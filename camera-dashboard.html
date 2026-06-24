@@ -1,0 +1,767 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Robot Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0d10;
+    --grid-line: rgba(255,255,255,0.045);
+    --panel-bg:#11151a;
+    --panel-bg-2:#0d1115;
+    --panel-border:#232b33;
+    --panel-border-hi:#3a4552;
+    --accent:#4fd8ff;
+    --accent-dim: rgba(79,216,255,0.35);
+    --amber:#ffb347;
+    --text:#e7edf2;
+    --text-dim:#7e8a95;
+    --danger:#ff5c5c;
+    --radius: 10px;
+  }
+
+  *{ box-sizing: border-box; }
+
+  html,body{
+    margin:0; padding:0; width:100%; height:100%;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .grid-bg{
+    position: fixed; inset:0; z-index:0; pointer-events:none;
+    background-image:
+      repeating-linear-gradient(0deg, var(--grid-line) 0 1px, transparent 1px 48px),
+      repeating-linear-gradient(90deg, var(--grid-line) 0 1px, transparent 1px 48px);
+    background-position: -1px -1px;
+  }
+  .grid-bg::after{
+    content:"";
+    position:absolute; inset:0;
+    background: radial-gradient(ellipse at 50% 0%, rgba(79,216,255,0.06), transparent 60%);
+  }
+
+  .topbar{
+    position: fixed; top:0; left:0; right:0; z-index:5;
+    display:flex; align-items:baseline; justify-content:space-between;
+    padding: 16px 22px;
+    pointer-events:none;
+  }
+  .topbar .title{
+    font-size: 13px; font-weight:700; letter-spacing: 0.12em;
+    color: var(--text);
+  }
+  .topbar .title span{ color: var(--accent); }
+  .topbar .hint{
+    font-size: 11px; color: var(--text-dim); letter-spacing: 0.04em;
+  }
+
+  .surface{ position: fixed; inset:0; z-index:1; }
+
+  /* ============ Shared widget chrome ============ */
+  .widget{
+    position: absolute;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: var(--radius);
+    box-shadow: 0 18px 40px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.02) inset;
+    display:flex; flex-direction:column;
+    overflow:hidden;
+    transition: box-shadow .18s ease, border-color .18s ease;
+  }
+  .widget.dragging, .widget.resizing{
+    border-color: var(--panel-border-hi);
+    box-shadow: 0 22px 55px rgba(0,0,0,0.65), 0 0 0 1px var(--accent-dim) inset;
+    transition: none;
+    user-select:none;
+  }
+  .widget.focused{ z-index: 50; }
+
+  .widget-header{
+    flex: 0 0 auto;
+    height: 38px;
+    display:flex; align-items:center; gap:10px;
+    padding: 0 10px 0 12px;
+    background: var(--panel-bg-2);
+    border-bottom: 1px solid var(--panel-border);
+    cursor: grab;
+    touch-action: none;
+  }
+  .widget-header.dragging{ cursor: grabbing; }
+
+  .widget-title{
+    font-size: 11px; font-weight:700; letter-spacing: 0.1em;
+    color: var(--text-dim); text-transform: uppercase;
+    white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
+    flex: 0 0 auto;
+  }
+  .widget-title b{ color: var(--accent); font-weight:700; }
+
+  .resize-handle{
+    position:absolute; right:0; bottom:0;
+    width: 20px; height:20px;
+    cursor: nwse-resize; touch-action:none; z-index: 3;
+  }
+  .resize-handle::before{
+    content:""; position:absolute; right:4px; bottom:4px;
+    width:9px; height:9px;
+    border-right:2px solid var(--panel-border-hi);
+    border-bottom:2px solid var(--panel-border-hi);
+  }
+  .widget:hover .resize-handle::before{ border-color: var(--accent); }
+
+  /* ============ Camera widget ============ */
+  #camPanel{
+    top: 110px; left: 60px;
+    width: 420px; height: 320px;
+    min-width: 240px; min-height: 190px;
+  }
+  .rec-indicator{
+    display:flex; align-items:center; gap:6px;
+    font-size: 10px; font-weight:700; letter-spacing: 0.1em;
+    color: var(--danger); flex: 0 0 auto;
+  }
+  .rec-indicator .dot{
+    width:7px; height:7px; border-radius:50%;
+    background: var(--danger);
+    box-shadow: 0 0 0 0 rgba(255,92,92,0.6);
+    animation: pulse 1.6s infinite;
+  }
+  .rec-indicator.idle .dot{ background: var(--text-dim); animation:none; box-shadow:none; }
+  .rec-indicator.idle{ color: var(--text-dim); }
+  @keyframes pulse{
+    0%{ box-shadow: 0 0 0 0 rgba(255,92,92,0.55); }
+    70%{ box-shadow: 0 0 0 6px rgba(255,92,92,0); }
+    100%{ box-shadow: 0 0 0 0 rgba(255,92,92,0); }
+  }
+  .device-label{
+    flex: 1 1 auto;
+    font-size: 11px; color: var(--text-dim);
+    white-space: nowrap; overflow:hidden; text-overflow: ellipsis;
+  }
+  .header-actions{ flex: 0 0 auto; display:flex; gap:6px; }
+  .hbtn{
+    appearance:none; border:1px solid var(--panel-border);
+    background: #161c22; color: var(--text);
+    font-family: inherit; font-size: 10px; font-weight:600; letter-spacing: 0.06em;
+    padding: 6px 9px; border-radius: 6px; cursor:pointer;
+    display:flex; align-items:center; gap:5px;
+    transition: border-color .15s, color .15s, transform .08s;
+  }
+  .hbtn:hover{ border-color: var(--accent-dim); color: var(--accent); }
+  .hbtn:active{ transform: scale(0.94); }
+  .hbtn svg{ width:12px; height:12px; }
+  .hbtn.toggled{ color: var(--amber); border-color: rgba(255,179,71,0.4); }
+
+  .video-frame{ position: relative; flex: 1 1 auto; background:#000; overflow:hidden; }
+  .video-frame video{
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit: cover; background:#000;
+  }
+  .video-frame video.mirrored{ transform: scaleX(-1); }
+  .video-frame.empty::before{
+    content: attr(data-msg);
+    position:absolute; inset:0;
+    display:flex; align-items:center; justify-content:center;
+    text-align:center; padding: 20px;
+    font-size: 12px; color: var(--text-dim);
+    background: var(--panel-bg);
+  }
+  .vf-corner{ position:absolute; width:18px; height:18px; border:2px solid var(--accent); opacity:.85; pointer-events:none; }
+  .vf-tl{ top:8px; left:8px; border-right:none; border-bottom:none; }
+  .vf-tr{ top:8px; right:8px; border-left:none; border-bottom:none; }
+  .vf-bl{ bottom:8px; left:8px; border-right:none; border-top:none; }
+  .vf-br{ bottom:8px; right:8px; border-left:none; border-top:none; }
+  .readout{
+    position:absolute; font-size:10px; letter-spacing:.04em; color:var(--text);
+    background: rgba(10,13,16,0.55); padding:3px 7px; border-radius:4px; pointer-events:none;
+  }
+  .readout-res{ bottom: 8px; left: 8px; }
+  .readout-idx{ bottom: 8px; right: 8px; color: var(--accent); }
+
+  /* ============ Robot control widget ============ */
+  #robotPanel{
+    top: 110px; left: 700px; /* JS re-docks to right on load */
+    width: 340px; height: 560px;
+    min-width: 300px; min-height: 300px;
+  }
+  #robotPanel .widget-body{
+    flex: 1 1 auto; overflow-y: auto; overflow-x: hidden;
+    padding: 16px 14px 22px;
+    display:flex; flex-direction:column; align-items:center; gap:14px;
+    scrollbar-width: thin; scrollbar-color: var(--panel-border-hi) transparent;
+  }
+  #robotPanel .widget-body::-webkit-scrollbar{ width:8px; }
+  #robotPanel .widget-body::-webkit-scrollbar-thumb{ background: var(--panel-border-hi); border-radius:4px; }
+
+  #robotPanel #status{
+    font-size: 10px; font-weight:700; letter-spacing:.08em;
+    padding: 5px 16px; display:inline-block; border-radius: 20px;
+    background-color:#3a1a1a; border:1px solid rgba(255,92,92,.4); color:#ffd4d4;
+    transition: background-color .3s, border-color .3s, color .3s;
+  }
+  #robotPanel #status.connected{
+    background-color:#13301f; border-color: rgba(46,204,113,.45); color:#8ff0b8;
+  }
+
+  #robotPanel .net-bar{
+    display:flex; align-items:center; justify-content:center;
+    gap:10px; flex-wrap:wrap;
+  }
+  #robotPanel #net-mode-label{ font-size:10px; font-weight:700; letter-spacing:.06em; color:var(--text-dim); text-transform:uppercase; }
+  #robotPanel #net-ip{ font-size:10px; color:#5f6b75; font-family:inherit; min-width:110px; text-align:left; }
+  #robotPanel .net-toggle-btn{
+    padding:6px 14px; border-radius:20px; border:1px solid var(--panel-border);
+    background:#161c22; color:var(--text); font-family:inherit;
+    font-size:10px; font-weight:600; cursor:pointer; letter-spacing:.05em;
+    transition: background-color .2s, border-color .2s, color .2s, opacity .2s;
+  }
+  #robotPanel .net-toggle-btn:hover{ border-color: var(--accent-dim); color: var(--accent); }
+  #robotPanel .net-toggle-btn.lan-active{ background:#13301f; border-color: rgba(46,204,113,.5); color:#8ff0b8; }
+  #robotPanel .net-toggle-btn.switching{ opacity:.5; pointer-events:none; }
+
+  #robotPanel .steer-mode-row{ display:flex; align-items:center; justify-content:center; gap:10px; }
+  #robotPanel .steer-mode-label{ font-size:10px; font-weight:700; letter-spacing:.1em; color:var(--text-dim); text-transform:uppercase; }
+  #robotPanel .toggle-track{
+    width:52px; height:26px; border-radius:13px;
+    background:#2a323b; border:1px solid var(--panel-border-hi);
+    cursor:pointer; position:relative; transition: background-color .2s, border-color .2s; flex-shrink:0;
+  }
+  #robotPanel .toggle-track.dual{ background:#10384f; border-color: var(--accent-dim); }
+  #robotPanel .toggle-knob{
+    width:18px; height:18px; border-radius:50%; background:var(--text-dim);
+    position:absolute; top:3px; left:3px; transition: transform .2s, background-color .2s;
+  }
+  #robotPanel .toggle-track.dual .toggle-knob{ transform: translateX(26px); background: var(--accent); }
+  #robotPanel .steer-mode-value{ font-size:11px; font-weight:700; color:var(--text-dim); min-width:34px; text-align:left; transition: color .2s; }
+  #robotPanel .steer-mode-value.dual{ color: var(--accent); }
+
+  #robotPanel .ctrl-panel{ display:flex; flex-direction:column; gap:12px; align-items:center; width:100%; }
+  #robotPanel .section-label{ font-size:10px; font-weight:700; letter-spacing:.14em; color:var(--text-dim); text-transform:uppercase; margin-bottom:2px; }
+  #robotPanel .btn-group{ display:flex; gap:8px; justify-content:center; align-items:center; }
+  #robotPanel .btn{
+    width:58px; height:58px; border-radius:10px;
+    font-size:19px; font-weight:700; cursor:pointer;
+    background:#161c22; color:var(--text); border:1px solid var(--panel-border);
+    transition: background-color .1s, border-color .1s, transform .1s;
+    display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px;
+  }
+  #robotPanel .btn span.key{ font-size:9px; color:var(--text-dim); font-weight:400; }
+  #robotPanel .btn:active, #robotPanel .btn.active{ background: var(--accent); border-color: var(--accent); color:#06222b; transform: scale(.95); }
+  #robotPanel .btn:active span.key, #robotPanel .btn.active span.key{ color:#06222b; }
+  #robotPanel .btn.drive-btn.active{ background:#e67e22; border-color:#f39c12; color:#241200; }
+  #robotPanel .btn.center-btn.active{ background:#2ecc71; border-color:#27ae60; color:#062012; }
+  #robotPanel .btn.stop-btn{ background:#2a1414; border-color:#5a2424; }
+  #robotPanel .btn.stop-btn.active{ background: var(--danger); border-color:#c0392b; color:#2a0000; }
+  #robotPanel #section-back-steer{ transition: opacity .2s; }
+  #robotPanel #section-back-steer.hidden{ opacity:.2; pointer-events:none; }
+  #robotPanel .divider{ width:240px; height:1px; background: var(--panel-border); }
+
+  #robotPanel .instructions{
+    margin-top:6px; font-size:11px; color:var(--text-dim);
+    background:#0d1115; border:1px solid var(--panel-border);
+    padding:12px 16px; border-radius:8px; text-align:left; line-height:1.9; width:100%;
+  }
+  #robotPanel .instructions strong{ color:var(--text); }
+  #robotPanel kbd{
+    background:#222b33; border:1px solid var(--panel-border-hi);
+    border-radius:4px; padding:1px 6px; color:#fff; font-weight:700; font-size:11px; font-family:inherit;
+  }
+
+  .error-banner{
+    position: fixed; left:50%; bottom: 28px; transform: translateX(-50%);
+    z-index: 100; max-width: 420px;
+    background:#1a1010; border:1px solid rgba(255,92,92,.4); color:#ffd4d4;
+    font-size:12px; line-height:1.5; padding:12px 16px; border-radius:8px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.5);
+  }
+  .error-banner b{ color: var(--danger); }
+
+  @media (max-width: 720px){
+    .topbar .hint{ display:none; }
+    #camPanel{ left:16px; top:84px; width: calc(100% - 32px); height: 240px; }
+    #robotPanel{ left:16px; top:336px; width: calc(100% - 32px); height: 480px; }
+  }
+</style>
+</head>
+<body>
+
+  <div class="grid-bg"></div>
+
+  <div class="topbar">
+    <div class="title">ROBOT<span>//</span>DASHBOARD</div>
+    <div class="hint">drag header · resize corner · widgets float free</div>
+  </div>
+
+  <div class="surface">
+
+    <!-- ============ CAMERA WIDGET ============ -->
+    <div class="widget" id="camPanel">
+      <div class="widget-header" id="camHeader">
+        <div class="rec-indicator idle" id="recIndicator"><span class="dot"></span>LIVE</div>
+        <div class="device-label" id="deviceLabel">Requesting camera…</div>
+        <div class="header-actions">
+          <button class="hbtn" id="mirrorBtn" title="Mirror image">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M5 5l-2 2 2 2M19 5l2 2-2 2M5 19l-2-2 2-2M19 19l2-2-2-2"/></svg>MIR
+          </button>
+          <button class="hbtn" id="flipBtn" title="Switch camera">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 2.1l4 4-4 4M3 12.2V8a4 4 0 0 1 4-4h14M7 21.9l-4-4 4-4M21 11.8V16a4 4 0 0 1-4 4H3"/></svg>FLIP
+          </button>
+        </div>
+      </div>
+      <div class="video-frame" id="videoFrame">
+        <video id="video" autoplay playsinline muted></video>
+        <span class="vf-corner vf-tl"></span><span class="vf-corner vf-tr"></span>
+        <span class="vf-corner vf-bl"></span><span class="vf-corner vf-br"></span>
+        <div class="readout readout-res" id="resReadout">—</div>
+        <div class="readout readout-idx" id="idxReadout">CAM —/—</div>
+      </div>
+      <div class="resize-handle" data-resize></div>
+    </div>
+
+    <!-- ============ ROBOT CONTROL WIDGET ============ -->
+    <div class="widget" id="robotPanel">
+      <div class="widget-header" id="robotHeader">
+        <div class="widget-title">🤖 DUAL-STEER <b>CONTROL</b></div>
+      </div>
+      <div class="widget-body">
+
+        <div id="status">Disconnected</div>
+
+        <div class="net-bar">
+          <span id="net-mode-label">📡 WiFi AP</span>
+          <button class="net-toggle-btn" id="net-toggle-btn">Switch to LAN</button>
+          <span id="net-ip">192.168.4.1</span>
+        </div>
+
+        <div class="steer-mode-row">
+          <span class="steer-mode-label">Steer</span>
+          <div class="toggle-track" id="steer-toggle"><div class="toggle-knob"></div></div>
+          <span class="steer-mode-value" id="steer-mode-value">Split</span>
+        </div>
+
+        <div class="ctrl-panel">
+          <!-- DRIVE -->
+          <div>
+            <div class="section-label">Drive</div>
+            <div class="btn-group">
+              <button class="btn drive-btn" id="btn-forward"  data-cmd="FORWARD"  data-stop="STOP">▲<span class="key">W</span></button>
+              <button class="btn stop-btn"  id="btn-stop">■<span class="key">Stop</span></button>
+              <button class="btn drive-btn" id="btn-backward" data-cmd="BACKWARD" data-stop="STOP">▼<span class="key">S</span></button>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- FRONT STEER -->
+          <div>
+            <div class="section-label" id="label-front-steer">Front Steering</div>
+            <div class="btn-group">
+              <button class="btn" id="btn-f-left"   data-cmd="F_LEFT"   data-stop="STOP_F">◀<span class="key">A</span></button>
+              <button class="btn center-btn" id="btn-f-center" data-cmd="F_CENTER" data-stop="">⊙<span class="key">F</span></button>
+              <button class="btn" id="btn-f-right"  data-cmd="F_RIGHT"  data-stop="STOP_F">▶<span class="key">D</span></button>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- BACK STEER -->
+          <div id="section-back-steer">
+            <div class="section-label">Back Steering</div>
+            <div class="btn-group">
+              <button class="btn" id="btn-b-left"   data-cmd="B_LEFT"   data-stop="STOP_B">◀<span class="key">Z</span></button>
+              <button class="btn center-btn" id="btn-b-center" data-cmd="B_CENTER" data-stop="">⊙<span class="key">V</span></button>
+              <button class="btn" id="btn-b-right"  data-cmd="B_RIGHT"  data-stop="STOP_B">▶<span class="key">C</span></button>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- GIMBAL -->
+          <div>
+            <div class="section-label">Camera Gimbal</div>
+            <div class="btn-group">
+              <button class="btn" id="btn-gimbal-up"     data-cmd="TILT_UP"    data-stop="STOP_GIMBAL">▲<span class="key">8</span></button>
+            </div>
+            <div class="btn-group">
+              <button class="btn" id="btn-gimbal-left"   data-cmd="BASE_LEFT"  data-stop="STOP_GIMBAL">◀<span class="key">4</span></button>
+              <button class="btn center-btn" id="btn-gimbal-center" data-cmd="GIMBAL_CENTER" data-stop="">⊙<span class="key">5</span></button>
+              <button class="btn" id="btn-gimbal-right"  data-cmd="BASE_RIGHT" data-stop="STOP_GIMBAL">▶<span class="key">6</span></button>
+            </div>
+            <div class="btn-group">
+              <button class="btn" id="btn-gimbal-down"   data-cmd="TILT_DOWN"  data-stop="STOP_GIMBAL">▼<span class="key">2</span></button>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <!-- HOME -->
+          <div>
+            <div class="section-label">Home</div>
+            <div class="btn-group">
+              <button class="btn" id="btn-home-all" data-cmd="HOME" data-stop="">🏠<span class="key">Enter</span></button>
+            </div>
+          </div>
+        </div>
+
+        <div class="instructions">
+          <strong>Keyboard Controls</strong><br>
+          <kbd>W</kbd>/<kbd>S</kbd> — Forward / Backward · release to stop<br>
+          <kbd>A</kbd>/<kbd>D</kbd> — Steer Left / Right · release to hold<br>
+          <kbd>F</kbd> — Re-center front wheels<br>
+          <kbd>Z</kbd>/<kbd>C</kbd> — Back steer (split mode)<br>
+          <kbd>V</kbd> — Re-center back wheels (split)<br>
+          <kbd>4</kbd>/<kbd>6</kbd> — Gimbal Left / Right<br>
+          <kbd>8</kbd>/<kbd>2</kbd> — Gimbal Up / Down<br>
+          <kbd>5</kbd> — Re-center gimbal<br>
+          <kbd>Tab</kbd> — Toggle Split / Dual steer<br>
+        </div>
+
+      </div>
+      <div class="resize-handle" data-resize></div>
+    </div>
+
+  </div>
+
+  <div class="error-banner" id="errorBanner" hidden></div>
+
+<script>
+/* =========================================================================
+   Shared: make a widget draggable (by header) and resizable (by corner)
+   ========================================================================= */
+let zTop = 50;
+function focusWidget(panel){
+  document.querySelectorAll('.widget.focused').forEach(w => w.classList.remove('focused'));
+  zTop += 1;
+  panel.style.zIndex = zTop;
+  panel.classList.add('focused');
+}
+
+function makeMovable(panel, header, handle, opts){
+  opts = opts || {};
+  const MIN_W = opts.minW || 240, MIN_H = opts.minH || 190;
+
+  panel.addEventListener('pointerdown', () => focusWidget(panel), true);
+
+  // ---- Drag ----
+  let dragging=false, offX=0, offY=0;
+  header.addEventListener('pointerdown', (e) => {
+    if(e.target.closest('.hbtn') || e.target.closest('.net-toggle-btn')) return;
+    dragging=true;
+    panel.classList.add('dragging'); header.classList.add('dragging');
+    header.setPointerCapture(e.pointerId);
+    const r=panel.getBoundingClientRect();
+    offX=e.clientX-r.left; offY=e.clientY-r.top;
+  });
+  header.addEventListener('pointermove', (e) => {
+    if(!dragging) return;
+    panel.style.left=(e.clientX-offX)+'px';
+    panel.style.top =(e.clientY-offY)+'px';
+  });
+  function endDrag(){
+    if(!dragging) return;
+    dragging=false;
+    panel.classList.remove('dragging'); header.classList.remove('dragging');
+    clamp(panel);
+  }
+  header.addEventListener('pointerup', endDrag);
+  header.addEventListener('pointercancel', endDrag);
+
+  // ---- Resize ----
+  let resizing=false, sW=0,sH=0,sX=0,sY=0;
+  handle.addEventListener('pointerdown', (e) => {
+    resizing=true; panel.classList.add('resizing');
+    handle.setPointerCapture(e.pointerId);
+    const r=panel.getBoundingClientRect();
+    sW=r.width; sH=r.height; sX=e.clientX; sY=e.clientY;
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if(!resizing) return;
+    const maxW = window.innerWidth - panel.offsetLeft - 8;
+    const maxH = window.innerHeight - panel.offsetTop - 8;
+    let w = Math.min(Math.max(sW+(e.clientX-sX), MIN_W), maxW);
+    let h = Math.min(Math.max(sH+(e.clientY-sY), MIN_H), maxH);
+    panel.style.width=w+'px'; panel.style.height=h+'px';
+  });
+  function endResize(){
+    if(!resizing) return;
+    resizing=false; panel.classList.remove('resizing');
+  }
+  handle.addEventListener('pointerup', endResize);
+  handle.addEventListener('pointercancel', endResize);
+}
+
+function clamp(panel){
+  const r=panel.getBoundingClientRect();
+  let left=parseFloat(panel.style.left), top=parseFloat(panel.style.top);
+  if(isNaN(left)) left=r.left; if(isNaN(top)) top=r.top;
+  left=Math.min(Math.max(left,0), Math.max(window.innerWidth-r.width,0));
+  top =Math.min(Math.max(top,0),  Math.max(window.innerHeight-r.height,0));
+  panel.style.left=left+'px'; panel.style.top=top+'px';
+}
+
+/* =========================================================================
+   Camera widget
+   ========================================================================= */
+(function(){
+  const panel=document.getElementById('camPanel');
+  const header=document.getElementById('camHeader');
+  const handle=panel.querySelector('[data-resize]');
+  makeMovable(panel, header, handle, {minW:240, minH:190});
+
+  const video=document.getElementById('video');
+  const videoFrame=document.getElementById('videoFrame');
+  const flipBtn=document.getElementById('flipBtn');
+  const mirrorBtn=document.getElementById('mirrorBtn');
+  const deviceLabel=document.getElementById('deviceLabel');
+  const resReadout=document.getElementById('resReadout');
+  const idxReadout=document.getElementById('idxReadout');
+  const recIndicator=document.getElementById('recIndicator');
+  const errorBanner=document.getElementById('errorBanner');
+
+  let devices=[], currentIndex=0, currentStream=null, mirrored=false;
+
+  function showError(m){ errorBanner.innerHTML=m; errorBanner.hidden=false; }
+  function clearError(){ errorBanner.hidden=true; }
+  function shortLabel(l,i){ if(!l) return 'Camera '+(i+1); return l.length>30?l.slice(0,30)+'…':l; }
+  function stopStream(){ if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); currentStream=null; } }
+
+  async function refreshDeviceList(){
+    const all=await navigator.mediaDevices.enumerateDevices();
+    devices=all.filter(d=>d.kind==='videoinput');
+  }
+
+  async function startCamera(index){
+    clearError(); videoFrame.classList.remove('empty'); stopStream();
+    const tries=[];
+    if(devices[index] && devices[index].deviceId) tries.push({video:{deviceId:{exact:devices[index].deviceId}}});
+    tries.push({video:{facingMode: index%2===0?'environment':'user'}});
+    tries.push({video:true});
+
+    let stream=null,lastErr=null;
+    for(const c of tries){ try{ stream=await navigator.mediaDevices.getUserMedia(c); break; }catch(err){ lastErr=err; } }
+
+    if(!stream){
+      recIndicator.classList.add('idle');
+      deviceLabel.textContent='No camera available';
+      videoFrame.classList.add('empty');
+      videoFrame.setAttribute('data-msg', lastErr&&lastErr.name==='NotAllowedError'
+        ? 'Camera access was blocked. Allow camera permissions for this page and reload.'
+        : 'No camera could be reached. Check that a camera is connected and not in use elsewhere.');
+      showError('<b>Camera unavailable —</b> '+(lastErr?lastErr.message:'unknown error'));
+      return;
+    }
+
+    currentStream=stream; video.srcObject=stream; recIndicator.classList.remove('idle');
+    await refreshDeviceList();
+
+    const track=stream.getVideoTracks()[0];
+    const settings=track.getSettings?track.getSettings():{};
+    if(devices.length===0){
+      idxReadout.textContent='CAM 1/1';
+      deviceLabel.textContent=shortLabel(track.label,0);
+    }else{
+      let found=devices.findIndex(d=>d.deviceId===settings.deviceId);
+      if(found===-1) found=index%devices.length;
+      currentIndex=found;
+      deviceLabel.textContent=shortLabel(devices[currentIndex].label,currentIndex);
+      idxReadout.textContent='CAM '+(currentIndex+1)+'/'+devices.length;
+    }
+
+    video.onloadedmetadata=()=>{ resReadout.textContent=video.videoWidth+' × '+video.videoHeight; };
+
+    const label=(track.label||'').toLowerCase();
+    setMirror(settings.facingMode==='user' || label.includes('front'));
+  }
+
+  function setMirror(on){ mirrored=on; video.classList.toggle('mirrored',mirrored); mirrorBtn.classList.toggle('toggled',mirrored); }
+
+  flipBtn.addEventListener('click', async ()=>{
+    flipBtn.disabled=true;
+    const total=devices.length||1;
+    currentIndex=(currentIndex+1)%total;
+    await startCamera(currentIndex);
+    flipBtn.disabled=false;
+  });
+  mirrorBtn.addEventListener('click', ()=>setMirror(!mirrored));
+
+  (async function init(){
+    if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      deviceLabel.textContent='Camera API not supported';
+      showError('<b>Unsupported browser —</b> getUserMedia is not available here.');
+      return;
+    }
+    try{ await refreshDeviceList(); }catch(e){}
+    await startCamera(0);
+  })();
+})();
+
+/* =========================================================================
+   Robot control widget  (logic preserved from the original panel)
+   ========================================================================= */
+(function(){
+  const panel=document.getElementById('robotPanel');
+  const header=document.getElementById('robotHeader');
+  const handle=panel.querySelector('[data-resize]');
+  makeMovable(panel, header, handle, {minW:300, minH:300});
+
+  // ---- auto-dock to the right edge on load ----
+  function dockRight(){
+    if(window.innerWidth <= 720) return; // mobile uses stacked CSS layout
+    const margin=24;
+    panel.style.left=(window.innerWidth - panel.offsetWidth - margin)+'px';
+    panel.style.top='110px';
+  }
+  dockRight();
+
+  // --- Gateway URLs ---
+  const WIFI_GATEWAY='ws://192.168.4.1:81/';
+  let lanGateway=null, currentMode='wifi';
+  let websocket, reconnectDelay=500, heartbeatInterval=null;
+  let isDualSteer=false, isSwitching=false;
+
+  const keyMap={
+    's':'btn-forward','w':'btn-backward',
+    'a':'btn-f-left','d':'btn-f-right','f':'btn-f-center',
+    'z':'btn-b-left','c':'btn-b-right','v':'btn-b-center',
+    '8':'btn-gimbal-up','2':'btn-gimbal-down',
+    '4':'btn-gimbal-left','6':'btn-gimbal-right','5':'btn-gimbal-center',
+    'enter':'btn-home-all'
+  };
+  let keysPressed={};
+
+  // --- Network mode toggle ---
+  function toggleNetMode(){
+    if(isSwitching) return; isSwitching=true;
+    const btn=document.getElementById('net-toggle-btn');
+    btn.classList.add('switching'); btn.textContent='Switching…';
+    if(currentMode==='wifi'){
+      sendCommand('NET_LAN');
+      setTimeout(()=>{ if(currentMode==='wifi'){ btn.classList.remove('switching'); btn.textContent='Switch to LAN'; isSwitching=false; } },12000);
+    }else{
+      sendCommand('NET_WIFI');
+      setTimeout(()=>{ currentMode='wifi'; lanGateway=null; updateNetUI(); reconnectDelay=500; initWebSocket(); isSwitching=false; },3000);
+    }
+  }
+  function updateNetUI(){
+    const btn=document.getElementById('net-toggle-btn');
+    const label=document.getElementById('net-mode-label');
+    const ipEl=document.getElementById('net-ip');
+    if(currentMode==='lan'){
+      label.textContent='🔌 LAN'; btn.textContent='Switch to WiFi'; btn.classList.add('lan-active');
+      ipEl.textContent=lanGateway?lanGateway.replace('ws://','').replace(':81/',''):'…';
+    }else{
+      label.textContent='📡 WiFi AP'; btn.textContent='Switch to LAN'; btn.classList.remove('lan-active');
+      ipEl.textContent='192.168.4.1';
+    }
+    btn.classList.remove('switching');
+  }
+  document.getElementById('net-toggle-btn').addEventListener('click', toggleNetMode);
+
+  // --- Steer mode toggle ---
+  function toggleSteerMode(){
+    isDualSteer=!isDualSteer;
+    const track=document.getElementById('steer-toggle');
+    const label=document.getElementById('steer-mode-value');
+    const backSec=document.getElementById('section-back-steer');
+    const frontLbl=document.getElementById('label-front-steer');
+    if(isDualSteer){
+      track.classList.add('dual'); label.classList.add('dual');
+      label.textContent='Dual'; backSec.classList.add('hidden'); frontLbl.textContent='Steering (Both)';
+    }else{
+      track.classList.remove('dual'); label.classList.remove('dual');
+      label.textContent='Split'; backSec.classList.remove('hidden'); frontLbl.textContent='Front Steering';
+    }
+  }
+  document.getElementById('steer-toggle').addEventListener('click', toggleSteerMode);
+
+  // --- WebSocket ---
+  function getGateway(){ return (currentMode==='lan'&&lanGateway)?lanGateway:WIFI_GATEWAY; }
+  function initWebSocket(){
+    if(websocket){ try{ websocket.close(); }catch(e){} }
+    try{ websocket=new WebSocket(getGateway()); }catch(e){ return; }
+    websocket.onopen=()=>{
+      reconnectDelay=500;
+      const s=document.getElementById('status'); s.textContent='Connected'; s.className='connected';
+      clearInterval(heartbeatInterval);
+      heartbeatInterval=setInterval(()=>{ if(websocket&&websocket.readyState===WebSocket.OPEN) websocket.send('PING'); },1000);
+    };
+    websocket.onclose=()=>{
+      clearInterval(heartbeatInterval);
+      const s=document.getElementById('status'); s.textContent='Disconnected'; s.className='';
+      if(!isSwitching){ setTimeout(initWebSocket, reconnectDelay); reconnectDelay=Math.min(reconnectDelay*2,5000); }
+    };
+    websocket.onerror=()=>{ try{ websocket.close(); }catch(e){} };
+    websocket.onmessage=(event)=>{
+      const msg=event.data;
+      if(msg.startsWith('LAN_IP:')){
+        const ip=msg.split(':')[1];
+        lanGateway=`ws://${ip}:81/`; currentMode='lan'; updateNetUI(); isSwitching=false;
+        reconnectDelay=500; setTimeout(initWebSocket,1500);
+      }else if(msg.startsWith('WIFI_IP:')){ /* handled by toggle timer */ }
+    };
+  }
+  function sendCommand(cmd){ if(websocket&&websocket.readyState===WebSocket.OPEN) websocket.send(cmd); }
+
+  // --- Dual steer fan-out ---
+  function sendSteer(cmd){
+    if(!isDualSteer){ sendCommand(cmd); return; }
+    const dualMap={'F_LEFT':['F_LEFT','B_LEFT'],'F_RIGHT':['F_RIGHT','B_RIGHT'],'F_CENTER':['F_CENTER','B_CENTER'],'STOP_F':['STOP_F','STOP_B']};
+    (dualMap[cmd]||[cmd]).forEach(c=>sendCommand(c));
+  }
+
+  // --- Button helpers ---
+  function pressButton(btn){
+    if(!btn) return; btn.classList.add('active');
+    const cmd=btn.dataset.cmd;
+    if(['F_LEFT','F_RIGHT','F_CENTER'].includes(cmd)) sendSteer(cmd); else sendCommand(cmd);
+  }
+  function releaseButton(btn){
+    if(!btn) return; btn.classList.remove('active');
+    const stop=btn.dataset.stop; if(!stop) return;
+    if(stop==='STOP_F') sendSteer('STOP_F'); else sendCommand(stop);
+  }
+
+  panel.querySelectorAll('.btn[data-cmd]').forEach(btn=>{
+    btn.addEventListener('mousedown', ()=>pressButton(btn));
+    btn.addEventListener('mouseup',   ()=>releaseButton(btn));
+    btn.addEventListener('mouseleave',()=>{ if(btn.classList.contains('active')) releaseButton(btn); });
+    btn.addEventListener('touchstart',(e)=>{ e.preventDefault(); pressButton(btn); });
+    btn.addEventListener('touchend',  (e)=>{ e.preventDefault(); releaseButton(btn); });
+  });
+
+  const btnStop=document.getElementById('btn-stop');
+  btnStop.addEventListener('mousedown', ()=>{ sendCommand('STOP'); btnStop.classList.add('active'); });
+  btnStop.addEventListener('mouseup',   ()=>btnStop.classList.remove('active'));
+  btnStop.addEventListener('touchstart',(e)=>{ e.preventDefault(); sendCommand('STOP'); btnStop.classList.add('active'); });
+  btnStop.addEventListener('touchend',  (e)=>{ e.preventDefault(); btnStop.classList.remove('active'); });
+
+  // --- Keyboard ---
+  window.addEventListener('keydown',(e)=>{
+    const key=e.key.toLowerCase();
+    if(key==='tab'){ e.preventDefault(); toggleSteerMode(); return; }
+    if(keysPressed[key]) return;
+    if(!(key in keyMap)) return;
+    keysPressed[key]=true;
+    pressButton(document.getElementById(keyMap[key]));
+  });
+  window.addEventListener('keyup',(e)=>{
+    const key=e.key.toLowerCase();
+    keysPressed[key]=false;
+    if(key in keyMap) releaseButton(document.getElementById(keyMap[key]));
+  });
+
+  window.addEventListener('resize', dockRight);
+  initWebSocket();
+})();
+</script>
+</body>
+</html>

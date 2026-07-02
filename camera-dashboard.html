@@ -188,7 +188,7 @@
 
   /* ============ Robot control widget ============ */
   #robotPanel{
-    top: 110px; left: 700px; /* JS re-docks to right on load */
+    top: 110px; left: 700px;
     width: 340px; height: 560px;
     min-width: 300px; min-height: 300px;
   }
@@ -211,7 +211,7 @@
     background-color:#13301f; border-color: rgba(46,204,113,.45); color:#8ff0b8;
   }
 
-  #robotPanel .net-bar{
+  .net-bar{
     display:flex; align-items:center; justify-content:center;
     gap:10px; flex-wrap:wrap;
   }
@@ -284,6 +284,13 @@
   }
   .error-banner b{ color: var(--danger); }
 
+  /* New Gamepad State HUD bar indicator */
+  #gamepad-hud-status {
+    font-size: 10px; font-weight:700; color: var(--text-dim); margin-top: 4px; letter-spacing: 0.05em;
+  }
+  #gamepad-hud-status span { color: var(--danger); }
+  #gamepad-hud-status.active span { color: var(--accent); }
+
   @media (max-width: 720px){
     .topbar .hint{ display:none; }
     #camPanel{ left:16px; top:84px; width: calc(100% - 32px); height: 240px; }
@@ -346,6 +353,8 @@
           <div class="toggle-track" id="steer-toggle"><div class="toggle-knob"></div></div>
           <span class="steer-mode-value" id="steer-mode-value">Split</span>
         </div>
+
+        <div id="gamepad-hud-status">🕹️ HW Controller: <span id="gamepad-hud-lbl">CLICK PAGE THEN PRESS ANY BUTTON</span></div>
 
         <div class="ctrl-panel">
           <!-- DRIVE -->
@@ -412,16 +421,11 @@
         </div>
 
         <div class="instructions">
-          <strong>Keyboard Controls</strong><br>
-          <kbd>W</kbd>/<kbd>S</kbd> — Forward / Backward · release to stop<br>
-          <kbd>A</kbd>/<kbd>D</kbd> — Steer Left / Right · release to hold<br>
-          <kbd>F</kbd> — Re-center front wheels<br>
-          <kbd>Z</kbd>/<kbd>C</kbd> — Back steer (split mode)<br>
-          <kbd>V</kbd> — Re-center back wheels (split)<br>
-          <kbd>4</kbd>/<kbd>6</kbd> — Gimbal Left / Right<br>
-          <kbd>8</kbd>/<kbd>2</kbd> — Gimbal Up / Down<br>
-          <kbd>5</kbd> — Re-center gimbal<br>
-          <kbd>Tab</kbd> — Toggle Split / Dual steer<br>
+          <strong>Dashboard Controls</strong><br>
+          Stick Left Y — Drive Fwd/Bwd<br>
+          Stick Right X — Front Steering<br>
+          D-Pad Left/Right — Back Steering (Split Mode)<br>
+          <kbd>W</kbd>/<kbd>S</kbd>/<kbd>A</kbd>/<kbd>D</kbd> keys fallback supported<br>
         </div>
 
       </div>
@@ -605,7 +609,7 @@ function clamp(panel){
 })();
 
 /* =========================================================================
-   Robot control widget  (logic preserved from the original panel)
+   Robot control widget (Gamepad integration embedded)
    ========================================================================= */
 (function(){
   const panel=document.getElementById('robotPanel');
@@ -613,16 +617,14 @@ function clamp(panel){
   const handle=panel.querySelector('[data-resize]');
   makeMovable(panel, header, handle, {minW:300, minH:300});
 
-  // ---- auto-dock to the right edge on load ----
   function dockRight(){
-    if(window.innerWidth <= 720) return; // mobile uses stacked CSS layout
+    if(window.innerWidth <= 720) return; 
     const margin=24;
     panel.style.left=(window.innerWidth - panel.offsetWidth - margin)+'px';
     panel.style.top='110px';
   }
   dockRight();
 
-  // --- Gateway URLs ---
   const WIFI_GATEWAY='ws://192.168.4.1:81/';
   let lanGateway=null, currentMode='wifi';
   let websocket, reconnectDelay=500, heartbeatInterval=null;
@@ -638,7 +640,11 @@ function clamp(panel){
   };
   let keysPressed={};
 
-  // --- Network mode toggle ---
+  // State trackers
+  let lastDriveState = "STOP";
+  let lastFrontSteerState = "STOP_F";
+  let lastBackSteerState = "STOP_B";
+
   function toggleNetMode(){
     if(isSwitching) return; isSwitching=true;
     const btn=document.getElementById('net-toggle-btn');
@@ -666,7 +672,6 @@ function clamp(panel){
   }
   document.getElementById('net-toggle-btn').addEventListener('click', toggleNetMode);
 
-  // --- Steer mode toggle ---
   function toggleSteerMode(){
     isDualSteer=!isDualSteer;
     const track=document.getElementById('steer-toggle');
@@ -683,7 +688,6 @@ function clamp(panel){
   }
   document.getElementById('steer-toggle').addEventListener('click', toggleSteerMode);
 
-  // --- WebSocket ---
   function getGateway(){ return (currentMode==='lan'&&lanGateway)?lanGateway:WIFI_GATEWAY; }
   function initWebSocket(){
     if(websocket){ try{ websocket.close(); }catch(e){} }
@@ -706,19 +710,17 @@ function clamp(panel){
         const ip=msg.split(':')[1];
         lanGateway=`ws://${ip}:81/`; currentMode='lan'; updateNetUI(); isSwitching=false;
         reconnectDelay=500; setTimeout(initWebSocket,1500);
-      }else if(msg.startsWith('WIFI_IP:')){ /* handled by toggle timer */ }
+      }
     };
   }
   function sendCommand(cmd){ if(websocket&&websocket.readyState===WebSocket.OPEN) websocket.send(cmd); }
 
-  // --- Dual steer fan-out ---
   function sendSteer(cmd){
     if(!isDualSteer){ sendCommand(cmd); return; }
     const dualMap={'F_LEFT':['F_LEFT','B_LEFT'],'F_RIGHT':['F_RIGHT','B_RIGHT'],'F_CENTER':['F_CENTER','B_CENTER'],'STOP_F':['STOP_F','STOP_B']};
     (dualMap[cmd]||[cmd]).forEach(c=>sendCommand(c));
   }
 
-  // --- Button helpers ---
   function pressButton(btn){
     if(!btn) return; btn.classList.add('active');
     const cmd=btn.dataset.cmd;
@@ -744,7 +746,6 @@ function clamp(panel){
   btnStop.addEventListener('touchstart',(e)=>{ e.preventDefault(); sendCommand('STOP'); btnStop.classList.add('active'); });
   btnStop.addEventListener('touchend',  (e)=>{ e.preventDefault(); btnStop.classList.remove('active'); });
 
-  // --- Keyboard ---
   window.addEventListener('keydown',(e)=>{
     const key=e.key.toLowerCase();
     if(key==='tab'){ e.preventDefault(); toggleSteerMode(); return; }
@@ -759,8 +760,125 @@ function clamp(panel){
     if(key in keyMap) releaseButton(document.getElementById(keyMap[key]));
   });
 
+  /* -----------------------------------------------------------------------
+     Game loop for 8BitDo Controller monitoring
+     ----------------------------------------------------------------------- */
+  const hudContainer = document.getElementById('gamepad-hud-status');
+  const hudLabel = document.getElementById('gamepad-hud-lbl');
+
+  function updateGamepadState() {
+    // Standard approach to fetch live hardware snapshots on Chrome/Safari engines
+    const gamepads = typeof navigator.getGamepads === 'function' ? navigator.getGamepads() : [];
+    let gp = null;
+    
+    for (let i = 0; i < gamepads.length; i++) {
+      if (gamepads[i] && gamepads[i].connected) { 
+        gp = gamepads[i]; 
+        break; 
+      }
+    }
+
+    if (!gp) {
+      hudContainer.classList.remove('active');
+      hudLabel.textContent = "DISCONNECTED (CLICK SCREEN AND PRESS ANY BUTTON)";
+      requestAnimationFrame(updateGamepadState);
+      return;
+    }
+
+    hudContainer.classList.add('active');
+    hudLabel.textContent = gp.id.toUpperCase().slice(0, 24) + "... ACTIVE";
+
+    const DEADZONE = 0.25;
+
+    // 1. DRIVE MAPPING: Checks Axis 1 (Left Stick Y) or falls back to standard Trigger Buttons mapping
+    let leftStickY = (gp.axes && gp.axes[1] !== undefined) ? gp.axes[1] : 0;
+    let triggerAxisForward = (gp.buttons && gp.buttons[7]) ? gp.buttons[7].value : 0; // R2 Analog
+    let triggerAxisBackward = (gp.buttons && gp.buttons[6]) ? gp.buttons[6].value : 0; // L2 Analog
+
+    let currentDrive = "STOP";
+    if (leftStickY < -DEADZONE || triggerAxisForward > DEADZONE) currentDrive = "FORWARD";
+    else if (leftStickY > DEADZONE || triggerAxisBackward > DEADZONE) currentDrive = "BACKWARD";
+
+    if (currentDrive !== lastDriveState) {
+      lastDriveState = currentDrive;
+      const fwdBtn = document.getElementById('btn-forward');
+      const bwdBtn = document.getElementById('btn-backward');
+      
+      if (currentDrive === "FORWARD") {
+        fwdBtn.classList.add('active'); bwdBtn.classList.remove('active');
+        sendCommand("FORWARD");
+      } else if (currentDrive === "BACKWARD") {
+        bwdBtn.classList.add('active'); fwdBtn.classList.remove('active');
+        sendCommand("BACKWARD");
+      } else {
+        fwdBtn.classList.remove('active'); bwdBtn.classList.remove('active');
+        sendCommand("STOP");
+      }
+    }
+
+    // 2. FRONT STEER: Right Stick X (Axis 2)
+    let rightStickX = (gp.axes && gp.axes[2] !== undefined) ? gp.axes[2] : 0;
+    let currentFrontSteer = "STOP_F";
+    if (rightStickX < -DEADZONE) currentFrontSteer = "F_LEFT";
+    else if (rightStickX > DEADZONE) currentFrontSteer = "F_RIGHT";
+
+    if (currentFrontSteer !== lastFrontSteerState) {
+      lastFrontSteerState = currentFrontSteer;
+      const flBtn = document.getElementById('btn-f-left');
+      const frBtn = document.getElementById('btn-f-right');
+
+      if (currentFrontSteer === "F_LEFT") {
+        flBtn.classList.add('active'); frBtn.classList.remove('active');
+        sendSteer("F_LEFT");
+      } else if (currentFrontSteer === "F_RIGHT") {
+        frBtn.classList.add('active'); flBtn.classList.remove('active');
+        sendSteer("F_RIGHT");
+      } else {
+        flBtn.classList.remove('active'); frBtn.classList.remove('active');
+        sendSteer("STOP_F");
+      }
+    }
+
+    // 3. BACK STEER: D-Pad Buttons (Standard index: Left=14, Right=15)
+    let dpadLeft = false;
+    let dpadRight = false;
+    
+    if (gp.buttons) {
+      if (gp.buttons[14] !== undefined) dpadLeft = gp.buttons[14].pressed;
+      if (gp.buttons[15] !== undefined) dpadRight = gp.buttons[15].pressed;
+    }
+    
+    let currentBackSteer = "STOP_B";
+    if (dpadLeft) currentBackSteer = "B_LEFT";
+    else if (dpadRight) currentBackSteer = "B_RIGHT";
+
+    if (currentBackSteer !== lastBackSteerState) {
+      lastBackSteerState = currentBackSteer;
+      const blBtn = document.getElementById('btn-b-left');
+      const brBtn = document.getElementById('btn-b-right');
+
+      if (currentBackSteer === "B_LEFT") {
+        blBtn.classList.add('active'); brBtn.classList.remove('active');
+        if (!isDualSteer) sendCommand("B_LEFT");
+      } else if (currentBackSteer === "B_RIGHT") {
+        brBtn.classList.add('active'); blBtn.classList.remove('active');
+        if (!isDualSteer) sendCommand("B_RIGHT");
+      } else {
+        blBtn.classList.remove('active'); brBtn.classList.remove('active');
+        if (!isDualSteer) sendCommand("STOP_B");
+      }
+    }
+
+    requestAnimationFrame(updateGamepadState);
+  }
+
+  window.addEventListener("gamepadconnected", (e) => {
+    console.log("Gamepad registered hardware:", e.gamepad.id);
+  });
+
   window.addEventListener('resize', dockRight);
   initWebSocket();
+  requestAnimationFrame(updateGamepadState);
 })();
 </script>
 </body>
